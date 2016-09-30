@@ -90,7 +90,7 @@ Connection_Cipher_State::Connection_Cipher_State(Protocol_Version version,
 
       m_nonce = unlock(iv.bits_of());
 
-      m_aead->start(iv.bits_of());
+      //m_aead->start(iv.bits_of());
 
       if(version.supports_explicit_cbc_ivs())
          m_nonce_bytes_from_record = m_nonce_bytes_from_handshake;
@@ -119,6 +119,7 @@ std::vector<byte> Connection_Cipher_State::aead_nonce(u64bit seq, RandomNumberGe
          {
          std::vector<byte> nonce;
          nonce.swap(m_nonce);
+         printf("nonce from cbc\n");
          return nonce;
          }
       std::vector<byte> nonce(nonce_bytes_from_record());
@@ -262,8 +263,6 @@ void write_record(secure_vector<byte>& output,
       {
       const size_t ctext_size = aead->output_length(msg.get_size());
 
-      const std::vector<byte> nonce = cs->aead_nonce(seq, rng);
-
       const size_t rec_size = ctext_size + cs->nonce_bytes_from_record();
 
       BOTAN_ASSERT(rec_size <= 0xFFFF, "Ciphertext length fits in field");
@@ -271,13 +270,15 @@ void write_record(secure_vector<byte>& output,
 
       aead->set_ad(aad);
 
-      if(cs->cbc_nonce())
+      const std::vector<byte> nonce = cs->aead_nonce(seq, rng);
+
+      if(cs->nonce_bytes_from_record() > 0)
          {
-         output += nonce;
-         }
-      else if(cs->nonce_bytes_from_record() > 0)
-         {
-         output += std::make_pair(&nonce[cs->nonce_bytes_from_handshake()], cs->nonce_bytes_from_record());
+         printf("Appending CBC nonce '%s'\n", Botan::hex_encode(nonce).c_str());
+         if(cs->cbc_nonce())
+            output += nonce;
+         else
+            output += std::make_pair(&nonce[cs->nonce_bytes_from_handshake()], cs->nonce_bytes_from_record());
          }
 
       const size_t header_size = output.size();
@@ -288,6 +289,7 @@ void write_record(secure_vector<byte>& output,
       aead->start(nonce);
       printf("nonce %d ok\n", nonce.size());
       aead->finish(output, header_size);
+      printf("final %s\n", hex_encode(output).c_str());
 
       BOTAN_ASSERT(output.size() < MAX_CIPHERTEXT_SIZE,
                    "Produced ciphertext larger than protocol allows");
@@ -449,6 +451,8 @@ void decrypt_record(secure_vector<byte>& output,
                     Record_Type record_type,
                     Connection_Cipher_State& cs)
    {
+   printf("Dec ----------%s\n", Botan::hex_encode(record_contents, record_len).c_str());
+
    if(AEAD_Mode* aead = cs.aead())
       {
       const std::vector<byte> nonce = cs.aead_nonce(record_contents, record_len, record_sequence);

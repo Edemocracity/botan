@@ -52,6 +52,7 @@ void TLS_CBC_HMAC_AEAD_Mode::clear()
    {
    cipher().clear();
    mac().clear();
+   cbc_state().clear();
    }
 
 std::string TLS_CBC_HMAC_AEAD_Mode::name() const
@@ -106,7 +107,9 @@ void TLS_CBC_HMAC_AEAD_Mode::set_associated_data(const byte ad[], size_t ad_len)
 void TLS_CBC_HMAC_AEAD_Mode::start_msg(const byte nonce[], size_t nonce_len)
    {
    if(!valid_nonce_length(nonce_len))
+      {
       throw Invalid_IV_Length(name(), nonce_len);
+      }
 
    m_msg.clear();
 
@@ -154,8 +157,9 @@ void TLS_CBC_HMAC_AEAD_Encryption::finish(secure_vector<byte>& buffer, size_t of
 
    buffer.insert(buffer.end(), msg().begin(), msg().end());
 
-   const size_t input_size =
-      iv_size() + msg().size() + 1 + (use_encrypt_then_mac() ? 0 : tag_size());
+   printf("PT %s\n", Botan::hex_encode(buffer).c_str());
+
+   const size_t input_size = msg().size() + 1 + (use_encrypt_then_mac() ? 0 : tag_size());
    const size_t enc_size = round_up(input_size, block_size());
    const size_t pad_val = enc_size - input_size;
    const size_t buf_size = enc_size + (use_encrypt_then_mac() ? tag_size() : 0);
@@ -163,34 +167,42 @@ void TLS_CBC_HMAC_AEAD_Encryption::finish(secure_vector<byte>& buffer, size_t of
    BOTAN_ASSERT(enc_size % block_size() == 0,
                 "Buffer is an even multiple of block size");
 
+   mac().update(assoc_data());
+
+   if(use_encrypt_then_mac())
+      {
+      if(iv_size() > 0)
+         {
+         mac().update(cbc_state());
+         }
+
+      for(size_t i = 0; i != pad_val + 1; ++i)
+         buffer.push_back(static_cast<byte>(pad_val));
+      cbc_encrypt_record(&buffer[header_size], enc_size);
+      }
+
    // EtM also uses ciphertext size instead of plaintext size for AEAD input
    const byte* mac_input = (use_encrypt_then_mac() ? &buffer[header_size] : msg().data());
    const size_t mac_input_len = (use_encrypt_then_mac() ? enc_size : msg().size());
 
-   if(use_encrypt_then_mac())
-      {
-      for(size_t i = 0; i != pad_val + 1; ++i)
-         buffer.push_back(static_cast<byte>(pad_val));
-      cbc_encrypt_record(&buffer[header_size], enc_size - iv_size());
-      }
-
-   mac().update(assoc_data());
    mac().update(mac_input, mac_input_len);
-   buffer.resize(buffer.size() + tag_size());
-   mac().final(&buffer[buffer.size() - tag_size()]);
-   printf("MAC %s AD=%s %s=%s -> %s\n",
+   printf("MAC %s AD=%s %s=%s\n",
           use_encrypt_then_mac() ? "EtM" : "MtE",
           Botan::hex_encode(assoc_data()).c_str(),
           use_encrypt_then_mac() ? "CT" : "PT",
-          Botan::hex_encode(mac_input, mac_input_len).c_str(),
-          Botan::hex_encode(&buffer[buffer.size() - tag_size()], tag_size()).c_str());
+          Botan::hex_encode(mac_input, mac_input_len).c_str());
+
+   buffer.resize(buffer.size() + tag_size());
+   mac().final(&buffer[buffer.size() - tag_size()]);
+   printf("Produced tag = %s\n", Botan::hex_encode(&buffer[buffer.size() - tag_size()], tag_size()).c_str());
 
    if(use_encrypt_then_mac() == false)
       {
       for(size_t i = 0; i != pad_val + 1; ++i)
          buffer.push_back(static_cast<byte>(pad_val));
-      cbc_encrypt_record(&buffer[header_size], buf_size - iv_size());
+      cbc_encrypt_record(&buffer[header_size], buf_size);
       }
+   printf("Enc final %s\n", Botan::hex_encode(buffer).c_str());
    }
 
 namespace {
