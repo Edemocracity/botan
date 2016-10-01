@@ -295,7 +295,7 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
    byte* record_contents = msg().data();
 
    // This early exit does not leak info because all the values compared are public
-   if(record_len < tag_size() + iv_size() ||
+   if(record_len < tag_size() ||
       (record_len - (use_encrypt_then_mac() ? tag_size() : 0)) % block_size() != 0)
       {
       throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure (bad inputs)");
@@ -354,7 +354,7 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
       (sending empty records, instead of 1/(n-1) splitting)
       */
 
-      const u16bit size_ok_mask = CT::is_lte<u16bit>(static_cast<u16bit>(tag_size() + pad_size + iv_size()), static_cast<u16bit>(record_len + 1));
+      const u16bit size_ok_mask = CT::is_lte<u16bit>(static_cast<u16bit>(tag_size() + pad_size), static_cast<u16bit>(record_len + 1));
       pad_size &= size_ok_mask;
 
       CT::unpoison(record_contents, record_len);
