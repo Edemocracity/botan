@@ -225,7 +225,7 @@ namespace {
 * Returning 0 in the error case should ensure the MAC check will fail.
 * This approach is suggested in section 6.2.3.2 of RFC 5246.
 */
-u16bit tls_padding_check(const byte record[], size_t record_len)
+u16bit check_tls_padding(const byte record[], size_t record_len)
    {
    /*
    * TLS v1.0 and up require all the padding bytes be the same value
@@ -327,7 +327,7 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
       cbc_decrypt_record(record_contents, enc_size);
 
       // 0 if padding was invalid, otherwise 1 + padding_bytes
-      u16bit pad_size = tls_padding_check(record_contents, enc_size);
+      u16bit pad_size = check_tls_padding(record_contents, enc_size);
 
       const byte* plaintext_block = &record_contents[0];
       const u16bit plaintext_length = enc_size - pad_size;
@@ -344,7 +344,7 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
       cbc_decrypt_record(record_contents, record_len);
 
       // 0 if padding was invalid, otherwise 1 + padding_bytes
-      u16bit pad_size = tls_padding_check(record_contents, record_len);
+      u16bit pad_size = check_tls_padding(record_contents, record_len);
 
       /*
       This mask is zero if there is not enough room in the packet to get a valid MAC.
