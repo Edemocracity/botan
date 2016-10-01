@@ -119,6 +119,8 @@ Connection_Cipher_State::Connection_Cipher_State(Protocol_Version version,
       return;
       }
 
+   abort();
+   // does not run:
    m_block_cipher = BlockCipher::create(cipher_algo);
    m_mac = MessageAuthenticationCode::create("HMAC(" + mac_algo + ")");
    if(!m_block_cipher)
@@ -319,6 +321,8 @@ void write_record(secure_vector<byte>& output,
       return;
       }
 
+   abort();
+   // does not run:
    const size_t block_size = cs->block_size();
    const size_t iv_size = cs->iv_size();
    const size_t mac_size = cs->mac_size();
@@ -496,6 +500,9 @@ void decrypt_record(secure_vector<byte>& output,
       }
    else
       {
+      abort();
+      // does not run:
+
       // GenericBlockCipher case
       BlockCipher* bc = cs.block_cipher();
       BOTAN_ASSERT(bc != nullptr, "No cipher state set but needed to decrypt");
