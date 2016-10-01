@@ -328,7 +328,11 @@ Test::Result test_tls_handshake(Botan::TLS::Protocol_Version offer_version,
                   client_sent = unlock(rng.random_vec(c_len));
 
                   client->send(&client_sent[0], 1);
-                  client->send(&client_sent[1], client_sent.size() - 1);
+
+                  if(client_sent.size() > 1)
+                     {
+                     client->send(&client_sent[1], client_sent.size() - 1);
+                     }
                   }
 
                if(server->is_active() && server_sent.empty())
