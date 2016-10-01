@@ -320,13 +320,19 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
 
       if(!mac_ok)
          {
-         throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure (etm)");
+         throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure");
          }
 
       cbc_decrypt_record(record_contents, enc_size);
 
       // 0 if padding was invalid, otherwise 1 + padding_bytes
       u16bit pad_size = check_tls_padding(record_contents, enc_size);
+
+      // No oracle here, whoever sent us this had the key since MAC check passed
+      if(pad_size == 0)
+         {
+         throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure");
+         }
 
       const byte* plaintext_block = &record_contents[0];
       const u16bit plaintext_length = enc_size - pad_size;
