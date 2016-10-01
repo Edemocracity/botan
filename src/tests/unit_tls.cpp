@@ -312,7 +312,9 @@ Test::Result test_tls_handshake(Botan::TLS::Protocol_Version offer_version,
                if(rounds > 25)
                   {
                   if(r <= 2)
+                     {
                      result.test_failure("Still here after many rounds, deadlock?");
+                     }
                   break;
                   }
 
@@ -325,8 +327,8 @@ Test::Result test_tls_handshake(Botan::TLS::Protocol_Version offer_version,
                   const size_t c_len = 1 + rng.next_byte() + rng.next_byte();
                   client_sent = unlock(rng.random_vec(c_len));
 
-                  // TODO send in several records
-                  client->send(client_sent);
+                  client->send(&client_sent[0], 1);
+                  client->send(&client_sent[1], client_sent.size() - 1);
                   }
 
                if(server->is_active() && server_sent.empty())
@@ -862,9 +864,21 @@ class TLS_Unit_Tests : public Test
             test_all_versions(results, *creds, "RSA", "AES-128", "SHA-256 SHA-1", etm_setting);
             test_all_versions(results, *creds, "ECDH", "AES-128", "SHA-256 SHA-1", etm_setting);
 
+            test_all_versions(results, *creds, "RSA", "AES-256", "SHA-1", etm_setting);
+            test_all_versions(results, *creds, "ECDH", "AES-256", "SHA-1", etm_setting);
+
+#if defined(BOTAN_HAS_CAMELLIA)
+            test_all_versions(results, *creds, "RSA", "Camellia-128", "SHA-256", etm_setting);
+            test_all_versions(results, *creds, "ECDH", "Camellia-256", "SHA-256 SHA-384", etm_setting);
+#endif
+
 #if defined(BOTAN_HAS_DES)
             test_all_versions(results, *creds, "RSA", "3DES", "SHA-1", etm_setting);
             test_all_versions(results, *creds, "ECDH", "3DES", "SHA-1", etm_setting);
+#endif
+
+#if defined(BOTAN_HAS_SEED)
+            test_all_versions(results, *creds, "RSA", "SEED", "SHA-1", etm_setting);
 #endif
             }
 
