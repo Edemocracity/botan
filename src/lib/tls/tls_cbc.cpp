@@ -88,22 +88,6 @@ void TLS_CBC_HMAC_AEAD_Mode::key_schedule(const byte key[], size_t keylen)
    mac().set_key(&key[m_cipher_keylen], m_mac_keylen);
    }
 
-void TLS_CBC_HMAC_AEAD_Mode::set_associated_data(const byte ad[], size_t ad_len)
-   {
-   if(ad_len != 13)
-      throw Exception("Invalid TLS AEAD associated data length");
-   m_ad.assign(ad, ad + ad_len);
-
-   if(use_encrypt_then_mac())
-      {
-      // AAD hack for EtM
-      size_t pt_size = make_u16bit(m_ad[11], m_ad[12]);
-      size_t enc_size = round_up(iv_size() + pt_size + 1, block_size());
-      m_ad[11] = get_byte<uint16_t>(0, enc_size);
-      m_ad[12] = get_byte<uint16_t>(1, enc_size);
-      }
-   }
-
 void TLS_CBC_HMAC_AEAD_Mode::start_msg(const byte nonce[], size_t nonce_len)
    {
    if(!valid_nonce_length(nonce_len))
@@ -125,11 +109,43 @@ size_t TLS_CBC_HMAC_AEAD_Mode::process(byte buf[], size_t sz)
    return 0;
    }
 
+std::vector<byte> TLS_CBC_HMAC_AEAD_Mode::assoc_data_with_len(uint16_t len)
+   {
+   std::vector<byte> ad = m_ad;
+   BOTAN_ASSERT(ad.size() == 13, "Expected AAD size");
+   ad[11] = get_byte(0, len);
+   ad[12] = get_byte(1, len);
+   return ad;
+   }
+
+void TLS_CBC_HMAC_AEAD_Mode::set_associated_data(const byte ad[], size_t ad_len)
+   {
+   if(ad_len != 13)
+      throw Exception("Invalid TLS AEAD associated data length");
+   m_ad.assign(ad, ad + ad_len);
+   }
+
+void TLS_CBC_HMAC_AEAD_Encryption::set_associated_data(const byte ad[], size_t ad_len)
+   {
+   TLS_CBC_HMAC_AEAD_Mode::set_associated_data(ad, ad_len);
+
+   if(use_encrypt_then_mac())
+      {
+      std::vector<byte>& ad = assoc_data();
+      // AAD hack for EtM
+      size_t pt_size = make_u16bit(ad[11], ad[12]);
+      size_t enc_size = round_up(iv_size() + pt_size + 1, block_size());
+      ad[11] = get_byte<uint16_t>(0, enc_size);
+      ad[12] = get_byte<uint16_t>(1, enc_size);
+      }
+   }
+
 void TLS_CBC_HMAC_AEAD_Encryption::cbc_encrypt_record(byte buf[], size_t buf_size)
    {
    const size_t blocks = buf_size / block_size();
    BOTAN_ASSERT(buf_size % block_size() == 0, "Valid CBC input");
 
+   printf("Encrypting, CBC state %s\n", hex_encode(cbc_state()).c_str());
    xor_buf(buf, cbc_state().data(), block_size());
    cipher().encrypt(buf);
 
@@ -256,6 +272,8 @@ void TLS_CBC_HMAC_AEAD_Decryption::cbc_decrypt_record(byte record_contents[], si
    secure_vector<byte> last_ciphertext(block_size());
    copy_mem(last_ciphertext.data(), buf, block_size());
 
+   printf("Decrypting, CBC state %s\n", hex_encode(cbc_state()).c_str());
+   
    cipher().decrypt(buf);
    xor_buf(buf, cbc_state().data(), block_size());
 
@@ -272,22 +290,39 @@ void TLS_CBC_HMAC_AEAD_Decryption::cbc_decrypt_record(byte record_contents[], si
    cbc_state().assign(last_ciphertext.begin(), last_ciphertext.end());
    }
 
+size_t TLS_CBC_HMAC_AEAD_Decryption::output_length(size_t) const
+   {
+   /*
+   * We don't know this because the padding is arbitrary
+   */
+   return 0;
+   }
+
 void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t offset)
    {
    update(buffer, offset);
+   buffer.resize(offset);
 
-   BOTAN_ASSERT(msg().size() >= tag_size(), "Have the tag as part of final input");
+   const size_t record_len = msg().size();
+   byte* record_contents = msg().data();
 
-#if 0
-   // This early exit does not leak info because all the values are public
-   if((record_len < tag_size() + iv_size()) || ( enc_size % block_size() != 0))
-      throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure");
+   // This early exit does not leak info because all the values compared are public
+   if(record_len < tag_size() + iv_size() ||
+      (record_len - (use_encrypt_then_mac() ? tag_size() : 0)) % block_size() != 0)
+      {
+      throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure (bad inputs)");
+      }
 
    if(use_encrypt_then_mac())
       {
       const size_t enc_size = record_len - tag_size();
 
-      mac().update(assoc_data());
+      mac().update(assoc_data_with_len(iv_size() + enc_size));
+      if(iv_size() > 0)
+         {
+         printf("MAC CBC %s\n", hex_encode(cbc_state()).c_str());
+         mac().update(cbc_state());
+         }
       mac().update(record_contents, enc_size);
 
       std::vector<byte> mac_buf(tag_size());
@@ -297,9 +332,15 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
 
       const bool mac_ok = same_mem(&record_contents[mac_offset], mac_buf.data(), tag_size());
 
-      if(!mac_ok)
+      printf("MAC AD=%s CT=%s -> %s vs %s (EtM OK %d)\n", Botan::hex_encode(assoc_data_with_len(iv_size() + enc_size)).c_str(),
+                Botan::hex_encode(record_contents, enc_size).c_str(),
+                Botan::hex_encode(mac_buf).c_str(),
+             Botan::hex_encode(&record_contents[mac_offset], tag_size()).c_str(),
+                mac_ok);
+
+         if(!mac_ok)
          {
-         throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure");
+         throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure (etm)");
          }
 
       cbc_decrypt_record(record_contents, enc_size);
@@ -307,10 +348,12 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
       // 0 if padding was invalid, otherwise 1 + padding_bytes
       u16bit pad_size = tls_padding_check(record_contents, enc_size);
 
-      const byte* plaintext_block = &record_contents[iv_size()];
-      const u16bit plaintext_length = enc_size - iv_size() - pad_size;
+      const byte* plaintext_block = &record_contents[0];
+      const u16bit plaintext_length = enc_size - pad_size;
 
-      output.assign(plaintext_block, plaintext_block + plaintext_length);
+      printf("Decrypted to '%s'\n", hex_encode(plaintext_block, plaintext_length).c_str());
+
+      buffer.insert(buffer.end(), plaintext_block, plaintext_block + plaintext_length);
       }
    else
       {
@@ -323,12 +366,15 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
 
       // 0 if padding was invalid, otherwise 1 + padding_bytes
       u16bit pad_size = tls_padding_check(record_contents, record_len);
+      printf("CBC output '%s' padding %d\n", hex_encode(record_contents, record_len).c_str(), pad_size);
 
       // This mask is zero if there is not enough room in the packet to get
       // a valid MAC. We have to accept empty packets, since otherwise we
       // are not compatible with the BEAST countermeasure (thus record_len+1).
       const u16bit size_ok_mask = CT::is_lte<u16bit>(static_cast<u16bit>(tag_size() + pad_size + iv_size()), static_cast<u16bit>(record_len + 1));
       pad_size &= size_ok_mask;
+
+      printf("size_ok_mask %04X\n", size_ok_mask);
 
       CT::unpoison(record_contents, record_len);
 
@@ -338,10 +384,13 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
       */
       CT::unpoison(pad_size);
 
-      const byte* plaintext_block = &record_contents[iv_size()];
-      const u16bit plaintext_length = static_cast<u16bit>(record_len - tag_size() - iv_size() - pad_size);
+      const byte* plaintext_block = &record_contents[0];
+      const u16bit plaintext_length = static_cast<u16bit>(record_len - tag_size() - pad_size);
 
-      mac().update(assoc_data());
+      printf("rec_len=%d ts=%d iv=%d pad=%d -> pt len %d\n",
+             record_len, tag_size(), iv_size(), pad_size, plaintext_length);
+
+      mac().update(assoc_data_with_len(plaintext_length));
       mac().update(plaintext_block, plaintext_length);
 
       std::vector<byte> mac_buf(tag_size());
@@ -351,24 +400,25 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
 
       const bool mac_ok = same_mem(&record_contents[mac_offset], mac_buf.data(), tag_size());
 
-   printf("MAC AD=%s PT=%s -> %s\n", Botan::hex_encode(assoc_data()),
-          Botan::hex_encode(mac_input, mac_input_len),
-          Botan::hex_encode(&record_contents[mac_offset], tag_size());
+      printf("MAC AD=%s PT=%s (%d) -> %s vs %s (MtE OK %d)\n", Botan::hex_encode(assoc_data_with_len(plaintext_length)).c_str(),
+             Botan::hex_encode(plaintext_block, plaintext_length).c_str(), plaintext_length,
+                Botan::hex_encode(mac_buf).c_str(),
+             Botan::hex_encode(&record_contents[mac_offset], tag_size()).c_str(),
+                mac_ok);
 
-   const u16bit ok_mask = size_ok_mask & CT::expand_mask<u16bit>(mac_ok) & CT::expand_mask<u16bit>(pad_size);
+      const u16bit ok_mask = size_ok_mask & CT::expand_mask<u16bit>(mac_ok) & CT::expand_mask<u16bit>(pad_size);
 
       CT::unpoison(ok_mask);
 
       if(ok_mask)
          {
-         output.assign(plaintext_block, plaintext_block + plaintext_length);
+         buffer.insert(buffer.end(), plaintext_block, plaintext_block + plaintext_length);
          }
       else
          {
          throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure");
          }
       }
-#endif
    }
 
 }

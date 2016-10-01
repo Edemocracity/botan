@@ -23,11 +23,11 @@ namespace TLS {
 class TLS_CBC_HMAC_AEAD_Mode : public AEAD_Mode
    {
    public:
-      void set_associated_data(const byte ad[], size_t ad_len) override final;
-
       size_t process(uint8_t buf[], size_t sz) override final;
 
       std::string name() const override final;
+
+      void set_associated_data(const byte ad[], size_t ad_len) override;
 
       size_t update_granularity() const override final;
 
@@ -69,8 +69,10 @@ class TLS_CBC_HMAC_AEAD_Mode : public AEAD_Mode
          }
 
       secure_vector<byte>& cbc_state() { return m_cbc_state; }
-      const secure_vector<byte>& assoc_data() const { return m_ad; }
-      const secure_vector<byte>& msg() const { return m_msg; }
+      std::vector<byte>& assoc_data() { return m_ad; }
+      secure_vector<byte>& msg() { return m_msg; }
+
+      std::vector<byte> assoc_data_with_len(uint16_t len);
 
    private:
       void start_msg(const byte nonce[], size_t nonce_len) override final;
@@ -90,7 +92,7 @@ class TLS_CBC_HMAC_AEAD_Mode : public AEAD_Mode
       std::unique_ptr<MessageAuthenticationCode> m_mac;
 
       secure_vector<byte> m_cbc_state;
-      secure_vector<byte> m_ad;
+      std::vector<byte> m_ad;
       secure_vector<byte> m_msg;
    };
 
@@ -115,6 +117,8 @@ class BOTAN_DLL TLS_CBC_HMAC_AEAD_Encryption final : public TLS_CBC_HMAC_AEAD_Mo
                                 use_explicit_iv,
                                 use_encrypt_then_mac)
          {}
+
+      void set_associated_data(const byte ad[], size_t ad_len) override;
 
       size_t output_length(size_t input_length) const override;
 

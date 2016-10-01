@@ -94,6 +94,29 @@ Connection_Cipher_State::Connection_Cipher_State(Protocol_Version version,
 
       if(version.supports_explicit_cbc_ivs())
          m_nonce_bytes_from_record = m_nonce_bytes_from_handshake;
+      return;
+      }
+
+   if(!our_side)
+      {
+      m_aead.reset(new TLS_CBC_HMAC_AEAD_Decryption(
+                      cipher_algo,
+                      suite.cipher_keylen(),
+                      mac_algo,
+                      suite.mac_keylen(),
+                      version.supports_explicit_cbc_ivs(),
+                      uses_encrypt_then_mac));
+
+      m_aead->set_key(cipher_key + mac_key);
+
+      m_nonce = unlock(iv.bits_of());
+
+      if(version.supports_explicit_cbc_ivs())
+         m_nonce_bytes_from_record = m_nonce_bytes_from_handshake;
+      else
+         m_aead->start(iv.bits_of());
+
+      return;
       }
 
    m_block_cipher = BlockCipher::create(cipher_algo);
@@ -145,7 +168,14 @@ std::vector<byte> Connection_Cipher_State::aead_nonce(u64bit seq, RandomNumberGe
 std::vector<byte>
 Connection_Cipher_State::aead_nonce(const byte record[], size_t record_len, u64bit seq)
    {
-   if(nonce_bytes_from_handshake() == 12)
+   if(m_cbc_nonce)
+      {
+      if(record_len < nonce_bytes_from_record())
+         throw Decoding_Error("Invalid CBC packet too short to be valid");
+      std::vector<byte> nonce(record, record + nonce_bytes_from_record());
+      return nonce;
+      }
+   else if(nonce_bytes_from_handshake() == 12)
       {
       /*
       Assumes if the suite specifies 12 bytes come from the handshake then
@@ -471,7 +501,7 @@ void decrypt_record(secure_vector<byte>& output,
       output += std::make_pair(msg, msg_length);
       aead->finish(output, offset);
 
-      BOTAN_ASSERT(output.size() == ptext_size + offset, "Produced expected size");
+      //BOTAN_ASSERT(output.size() == ptext_size + offset, "Produced expected size");
       }
    else
       {
