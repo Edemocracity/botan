@@ -298,7 +298,7 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
    if(record_len < tag_size() ||
       (record_len - (use_encrypt_then_mac() ? tag_size() : 0)) % block_size() != 0)
       {
-      throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure (bad inputs)");
+      throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure");
       }
 
    if(use_encrypt_then_mac())
