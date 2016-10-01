@@ -17,7 +17,6 @@
 #include <botan/internal/rounding.h>
 #include <botan/internal/ct_utils.h>
 #include <botan/rng.h>
-#include <botan/hex.h>
 
 namespace Botan {
 

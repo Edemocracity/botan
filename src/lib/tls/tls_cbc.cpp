@@ -13,7 +13,6 @@
 #include <botan/tls_alert.h>
 #include <botan/tls_magic.h>
 #include <botan/tls_exceptn.h>
-#include <botan/hex.h>
 
 namespace Botan {
 
