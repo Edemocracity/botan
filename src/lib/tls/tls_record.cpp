@@ -142,12 +142,10 @@ std::vector<byte> Connection_Cipher_State::aead_nonce(u64bit seq, RandomNumberGe
          {
          std::vector<byte> nonce;
          nonce.swap(m_nonce);
-         printf("nonce from cbc\n");
          return nonce;
          }
       std::vector<byte> nonce(nonce_bytes_from_record());
       rng.randomize(nonce.data(), nonce.size());
-      printf("nonce_bytes_from_record = %d\n", nonce_bytes_from_record());
       return nonce;
       }
    else if(nonce_bytes_from_handshake() == 12)
@@ -304,7 +302,6 @@ void write_record(secure_vector<byte>& output,
 
       if(cs->nonce_bytes_from_record() > 0)
          {
-         printf("Appending CBC nonce '%s'\n", Botan::hex_encode(nonce).c_str());
          if(cs->cbc_nonce())
             output += nonce;
          else
@@ -314,12 +311,8 @@ void write_record(secure_vector<byte>& output,
       const size_t header_size = output.size();
       output += std::make_pair(msg.get_data(), msg.get_size());
 
-      printf("nonce = '%s'\n", hex_encode(nonce).c_str());
-      printf("nonce %d\n", nonce.size());
       aead->start(nonce);
-      printf("nonce %d ok\n", nonce.size());
       aead->finish(output, header_size);
-      printf("final %s\n", hex_encode(output).c_str());
 
       BOTAN_ASSERT(output.size() < MAX_CIPHERTEXT_SIZE,
                    "Produced ciphertext larger than protocol allows");
@@ -481,8 +474,6 @@ void decrypt_record(secure_vector<byte>& output,
                     Record_Type record_type,
                     Connection_Cipher_State& cs)
    {
-   printf("Dec ----------%s\n", Botan::hex_encode(record_contents, record_len).c_str());
-
    if(AEAD_Mode* aead = cs.aead())
       {
       const std::vector<byte> nonce = cs.aead_nonce(record_contents, record_len, record_sequence);
@@ -553,13 +544,6 @@ void decrypt_record(secure_vector<byte>& output,
 
          const bool mac_ok = same_mem(&record_contents[mac_offset], mac_buf.data(), mac_size);
 
-         printf("MAC AD=%s PT=%s -> %s vs %s (MtE OK %d)\n", Botan::hex_encode(ad).c_str(),
-                Botan::hex_encode(plaintext_block, plaintext_length).c_str(),
-                Botan::hex_encode(mac_buf).c_str(),
-                Botan::hex_encode(&record_contents[mac_offset], mac_size).c_str(),
-                mac_ok);
-
-
          const u16bit ok_mask = size_ok_mask & CT::expand_mask<u16bit>(mac_ok) & CT::expand_mask<u16bit>(pad_size);
 
          CT::unpoison(ok_mask);
@@ -570,7 +554,6 @@ void decrypt_record(secure_vector<byte>& output,
             }
          else
             {
-            printf("MtE failed: mac=%d pad=%d\n", mac_ok, pad_size);
             throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure (bad mac?)");
             }
          }
@@ -591,12 +574,6 @@ void decrypt_record(secure_vector<byte>& output,
          const size_t mac_offset = enc_size;
 
          const bool mac_ok = same_mem(&record_contents[mac_offset], mac_buf.data(), mac_size);
-
-         printf("MAC AD=%s CT=%s -> %s vs %s (EtM OK %d)\n", Botan::hex_encode(ad).c_str(),
-                Botan::hex_encode(record_contents, enc_size).c_str(),
-                Botan::hex_encode(mac_buf).c_str(),
-                Botan::hex_encode(&record_contents[mac_offset], mac_size).c_str(),
-                mac_ok);
 
          if(!mac_ok)
             {

@@ -145,7 +145,6 @@ void TLS_CBC_HMAC_AEAD_Encryption::cbc_encrypt_record(byte buf[], size_t buf_siz
    const size_t blocks = buf_size / block_size();
    BOTAN_ASSERT(buf_size % block_size() == 0, "Valid CBC input");
 
-   printf("Encrypting, CBC state %s\n", hex_encode(cbc_state()).c_str());
    xor_buf(buf, cbc_state().data(), block_size());
    cipher().encrypt(buf);
 
@@ -172,8 +171,6 @@ void TLS_CBC_HMAC_AEAD_Encryption::finish(secure_vector<byte>& buffer, size_t of
    const size_t header_size = offset;
 
    buffer.insert(buffer.end(), msg().begin(), msg().end());
-
-   printf("PT %s\n", Botan::hex_encode(buffer).c_str());
 
    const size_t input_size = msg().size() + 1 + (use_encrypt_then_mac() ? 0 : tag_size());
    const size_t enc_size = round_up(input_size, block_size());
@@ -202,15 +199,9 @@ void TLS_CBC_HMAC_AEAD_Encryption::finish(secure_vector<byte>& buffer, size_t of
    const size_t mac_input_len = (use_encrypt_then_mac() ? enc_size : msg().size());
 
    mac().update(mac_input, mac_input_len);
-   printf("MAC %s AD=%s %s=%s\n",
-          use_encrypt_then_mac() ? "EtM" : "MtE",
-          Botan::hex_encode(assoc_data()).c_str(),
-          use_encrypt_then_mac() ? "CT" : "PT",
-          Botan::hex_encode(mac_input, mac_input_len).c_str());
 
    buffer.resize(buffer.size() + tag_size());
    mac().final(&buffer[buffer.size() - tag_size()]);
-   printf("Produced tag = %s\n", Botan::hex_encode(&buffer[buffer.size() - tag_size()], tag_size()).c_str());
 
    if(use_encrypt_then_mac() == false)
       {
@@ -218,7 +209,6 @@ void TLS_CBC_HMAC_AEAD_Encryption::finish(secure_vector<byte>& buffer, size_t of
          buffer.push_back(static_cast<byte>(pad_val));
       cbc_encrypt_record(&buffer[header_size], buf_size);
       }
-   printf("Enc final %s\n", Botan::hex_encode(buffer).c_str());
    }
 
 namespace {
@@ -272,8 +262,6 @@ void TLS_CBC_HMAC_AEAD_Decryption::cbc_decrypt_record(byte record_contents[], si
    secure_vector<byte> last_ciphertext(block_size());
    copy_mem(last_ciphertext.data(), buf, block_size());
 
-   printf("Decrypting, CBC state %s\n", hex_encode(cbc_state()).c_str());
-   
    cipher().decrypt(buf);
    xor_buf(buf, cbc_state().data(), block_size());
 
@@ -320,7 +308,6 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
       mac().update(assoc_data_with_len(iv_size() + enc_size));
       if(iv_size() > 0)
          {
-         printf("MAC CBC %s\n", hex_encode(cbc_state()).c_str());
          mac().update(cbc_state());
          }
       mac().update(record_contents, enc_size);
@@ -332,13 +319,7 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
 
       const bool mac_ok = same_mem(&record_contents[mac_offset], mac_buf.data(), tag_size());
 
-      printf("MAC AD=%s CT=%s -> %s vs %s (EtM OK %d)\n", Botan::hex_encode(assoc_data_with_len(iv_size() + enc_size)).c_str(),
-                Botan::hex_encode(record_contents, enc_size).c_str(),
-                Botan::hex_encode(mac_buf).c_str(),
-             Botan::hex_encode(&record_contents[mac_offset], tag_size()).c_str(),
-                mac_ok);
-
-         if(!mac_ok)
+      if(!mac_ok)
          {
          throw TLS_Exception(Alert::BAD_RECORD_MAC, "Message authentication failure (etm)");
          }
@@ -350,8 +331,6 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
 
       const byte* plaintext_block = &record_contents[0];
       const u16bit plaintext_length = enc_size - pad_size;
-
-      printf("Decrypted to '%s'\n", hex_encode(plaintext_block, plaintext_length).c_str());
 
       buffer.insert(buffer.end(), plaintext_block, plaintext_block + plaintext_length);
       }
@@ -366,15 +345,17 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
 
       // 0 if padding was invalid, otherwise 1 + padding_bytes
       u16bit pad_size = tls_padding_check(record_contents, record_len);
-      printf("CBC output '%s' padding %d\n", hex_encode(record_contents, record_len).c_str(), pad_size);
 
-      // This mask is zero if there is not enough room in the packet to get
-      // a valid MAC. We have to accept empty packets, since otherwise we
-      // are not compatible with the BEAST countermeasure (thus record_len+1).
+      /*
+      This mask is zero if there is not enough room in the packet to get a valid MAC.
+
+      We have to accept empty packets, since otherwise we are not compatible
+      with how OpenSSL's countermeasure for fixing BEAST in TLS 1.0 CBC works
+      (sending empty records, instead of 1/(n-1) splitting)
+      */
+
       const u16bit size_ok_mask = CT::is_lte<u16bit>(static_cast<u16bit>(tag_size() + pad_size + iv_size()), static_cast<u16bit>(record_len + 1));
       pad_size &= size_ok_mask;
-
-      printf("size_ok_mask %04X\n", size_ok_mask);
 
       CT::unpoison(record_contents, record_len);
 
@@ -387,9 +368,6 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
       const byte* plaintext_block = &record_contents[0];
       const u16bit plaintext_length = static_cast<u16bit>(record_len - tag_size() - pad_size);
 
-      printf("rec_len=%d ts=%d iv=%d pad=%d -> pt len %d\n",
-             record_len, tag_size(), iv_size(), pad_size, plaintext_length);
-
       mac().update(assoc_data_with_len(plaintext_length));
       mac().update(plaintext_block, plaintext_length);
 
@@ -399,12 +377,6 @@ void TLS_CBC_HMAC_AEAD_Decryption::finish(secure_vector<byte>& buffer, size_t of
       const size_t mac_offset = record_len - (tag_size() + pad_size);
 
       const bool mac_ok = same_mem(&record_contents[mac_offset], mac_buf.data(), tag_size());
-
-      printf("MAC AD=%s PT=%s (%d) -> %s vs %s (MtE OK %d)\n", Botan::hex_encode(assoc_data_with_len(plaintext_length)).c_str(),
-             Botan::hex_encode(plaintext_block, plaintext_length).c_str(), plaintext_length,
-                Botan::hex_encode(mac_buf).c_str(),
-             Botan::hex_encode(&record_contents[mac_offset], tag_size()).c_str(),
-                mac_ok);
 
       const u16bit ok_mask = size_ok_mask & CT::expand_mask<u16bit>(mac_ok) & CT::expand_mask<u16bit>(pad_size);
 
